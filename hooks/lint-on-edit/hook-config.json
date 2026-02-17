@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "afterEdit": [
+      {
+        "pattern": "\\.(js|ts|jsx|tsx)$",
+        "command": "npx eslint --fix $FILE"
+      }
+    ]
+  }
+}

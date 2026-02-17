@@ -1,0 +1,801 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="1.0.0"
+SCRIPT_NAME="ots"
+
+# ── Configuration ────────────────────────────────────────────────────────────
+CONFIG_DIR="${HOME}/.config/ots"
+CONFIG_FILE="${CONFIG_DIR}/config"
+CACHE_DIR="${HOME}/.cache/ots"
+CACHE_TTL=300 # seconds
+
+REPO=""
+BRANCH="main"
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+
+CATEGORIES=("agents" "skills" "claude-md" "hooks" "mcp-configs")
+
+# ── Colors ───────────────────────────────────────────────────────────────────
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+MAGENTA=$'\033[0;35m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+NC=$'\033[0m'
+
+# ── Category Metadata (bash 3.x compatible) ─────────────────────────────────
+
+category_label() {
+  case "$1" in
+    agents)      echo "Agents" ;;
+    skills)      echo "Skills" ;;
+    claude-md)   echo "CLAUDE.md Templates" ;;
+    hooks)       echo "Hooks" ;;
+    mcp-configs) echo "MCP Configs" ;;
+    *)           echo "$1" ;;
+  esac
+}
+
+category_desc() {
+  case "$1" in
+    agents)      echo "Agent prompts and configurations" ;;
+    skills)      echo "Custom slash command skills (.claude/commands/)" ;;
+    claude-md)   echo "CLAUDE.md project templates" ;;
+    hooks)       echo "Hook configurations for Claude Code" ;;
+    mcp-configs) echo "MCP server configurations" ;;
+    *)           echo "" ;;
+  esac
+}
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+die() { echo "${RED}error:${NC} $*" >&2; exit 1; }
+info() { echo "${CYAN}::${NC} $*"; }
+success() { echo "${GREEN}ok${NC} $*"; }
+warn() { echo "${YELLOW}warning:${NC} $*"; }
+
+check_deps() {
+  local missing=()
+  local cmd
+  for cmd in curl jq fzf; do
+    command -v "$cmd" &>/dev/null || missing+=("$cmd")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    die "Missing dependencies: ${missing[*]}\nInstall them with your package manager (e.g. brew install ${missing[*]})"
+  fi
+}
+
+# ── Config ───────────────────────────────────────────────────────────────────
+
+load_config() {
+  if [[ -f "$CONFIG_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+  fi
+}
+
+save_config() {
+  mkdir -p "$CONFIG_DIR"
+  cat > "$CONFIG_FILE" <<EOF
+# off-the-shelf configuration
+REPO="${REPO}"
+BRANCH="${BRANCH}"
+EOF
+  success "Config saved to ${CONFIG_FILE}"
+}
+
+ensure_repo() {
+  if [[ -z "$REPO" ]]; then
+    echo "${BOLD}First-time setup${NC}"
+    echo "Enter your GitHub registry repo (e.g. username/claude-registry):"
+    read -r -p "> " REPO
+    [[ -z "$REPO" ]] && die "Repository is required"
+    echo "Enter branch [main]:"
+    read -r -p "> " input_branch
+    BRANCH="${input_branch:-main}"
+    save_config
+  fi
+}
+
+# ── GitHub API ───────────────────────────────────────────────────────────────
+
+gh_api() {
+  local endpoint="$1"
+  local url="https://api.github.com/repos/${REPO}/${endpoint}"
+  if [[ -n "$GITHUB_TOKEN" ]]; then
+    curl -sS -H "Accept: application/vnd.github.v3+json" \
+         -H "Authorization: token ${GITHUB_TOKEN}" "$url"
+  else
+    curl -sS -H "Accept: application/vnd.github.v3+json" "$url"
+  fi
+}
+
+gh_raw() {
+  local path="$1"
+  local url="https://raw.githubusercontent.com/${REPO}/${BRANCH}/${path}"
+  if [[ -n "$GITHUB_TOKEN" ]]; then
+    curl -sS -H "Authorization: token ${GITHUB_TOKEN}" "$url"
+  else
+    curl -sS "$url"
+  fi
+}
+
+# ── Cache ────────────────────────────────────────────────────────────────────
+
+cache_key() {
+  echo "$1" | sed 's/[^a-zA-Z0-9_-]/_/g'
+}
+
+cache_get() {
+  local key
+  key=$(cache_key "$1")
+  local file="${CACHE_DIR}/${key}"
+  if [[ -f "$file" ]]; then
+    local age=$(( $(date +%s) - $(stat -f %m "$file" 2>/dev/null || stat -c %Y "$file" 2>/dev/null) ))
+    if [[ $age -lt $CACHE_TTL ]]; then
+      cat "$file"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+cache_set() {
+  local key
+  key=$(cache_key "$1")
+  mkdir -p "$CACHE_DIR"
+  cat > "${CACHE_DIR}/${key}"
+}
+
+# ── Tree Fetching ────────────────────────────────────────────────────────────
+
+fetch_tree() {
+  local cached
+  if cached=$(cache_get "tree_${REPO}_${BRANCH}"); then
+    echo "$cached"
+    return
+  fi
+  local response
+  response=$(gh_api "git/trees/${BRANCH}?recursive=1")
+
+  # Check for errors
+  if echo "$response" | jq -e '.message' &>/dev/null 2>&1; then
+    local msg
+    msg=$(echo "$response" | jq -r '.message')
+    die "GitHub API error: ${msg}\nCheck that repo '${REPO}' exists and is accessible."
+  fi
+
+  echo "$response" | cache_set "tree_${REPO}_${BRANCH}"
+  echo "$response"
+}
+
+# Get items in a category (list of folder names)
+list_items_in_category() {
+  local category="$1"
+  local tree
+  tree=$(fetch_tree)
+  echo "$tree" | jq -r --arg cat "$category" '
+    .tree[]
+    | select(.path | startswith($cat + "/"))
+    | .path
+    | ltrimstr($cat + "/")
+    | split("/")[0]
+  ' | sort -u | grep -v '^\.' | grep -v '^$' || true
+}
+
+# ── Manifest Handling ────────────────────────────────────────────────────────
+
+fetch_manifest() {
+  local category="$1"
+  local item="$2"
+  local path="${category}/${item}/manifest.json"
+  local cached
+  if cached=$(cache_get "manifest_${path}"); then
+    echo "$cached"
+    return
+  fi
+  local content
+  content=$(gh_raw "$path")
+  if echo "$content" | jq empty 2>/dev/null; then
+    echo "$content" | cache_set "manifest_${path}"
+    echo "$content"
+  else
+    echo '{}'
+  fi
+}
+
+fetch_file() {
+  local path="$1"
+  gh_raw "$path"
+}
+
+# ── Display ──────────────────────────────────────────────────────────────────
+
+show_header() {
+  echo "${BOLD}${MAGENTA}"
+  echo '  ╔═══════════════════════════════╗'
+  echo '  ║   off-the-shelf  v'"${VERSION}"'      ║'
+  echo '  ║   Claude Code Asset Registry  ║'
+  echo '  ╚═══════════════════════════════╝'
+  echo "${NC}"
+  echo "  ${DIM}repo: ${REPO} (${BRANCH})${NC}"
+  echo
+}
+
+format_manifest() {
+  local manifest="$1"
+  local name desc author tags
+  name=$(echo "$manifest" | jq -r '.name // "Unnamed"')
+  desc=$(echo "$manifest" | jq -r '.description // "No description"')
+  author=$(echo "$manifest" | jq -r '.author // "unknown"')
+  tags=$(echo "$manifest" | jq -r '(.tags // []) | join(", ")')
+  local files
+  files=$(echo "$manifest" | jq -r '.install // {} | keys[]' 2>/dev/null || echo "(none)")
+
+  echo "${BOLD}${name}${NC}"
+  echo "${DIM}by ${author}${NC}"
+  echo
+  echo "${desc}"
+  echo
+  if [[ -n "$tags" ]]; then
+    echo "${DIM}tags: ${tags}${NC}"
+  fi
+  echo
+  echo "${BOLD}Files:${NC}"
+  echo "$files" | while read -r f; do
+    local target
+    target=$(echo "$manifest" | jq -r --arg f "$f" '.install[$f] // "?"')
+    echo "  ${f} -> ${CYAN}${target}${NC}"
+  done
+}
+
+# ── Preview Command (called by fzf) ─────────────────────────────────────────
+
+cmd_preview() {
+  local category="$1"
+  local item="$2"
+  local manifest
+  manifest=$(fetch_manifest "$category" "$item")
+  if [[ "$manifest" == "{}" ]]; then
+    echo "No manifest.json found for ${category}/${item}"
+    echo ""
+    echo "This item may not be properly configured."
+    return
+  fi
+  format_manifest "$manifest"
+}
+
+# ── Install ──────────────────────────────────────────────────────────────────
+
+cmd_install() {
+  local category="$1"
+  local item="$2"
+  local scope="${3:-project}" # project or global
+
+  local manifest
+  manifest=$(fetch_manifest "$category" "$item")
+
+  if [[ "$manifest" == "{}" ]]; then
+    die "No manifest.json found for ${category}/${item}"
+  fi
+
+  local name
+  name=$(echo "$manifest" | jq -r '.name // "'"$item"'"')
+
+  echo ""
+  echo "${BOLD}Installing: ${name}${NC}"
+  echo "${DIM}from ${category}/${item}${NC}"
+  echo ""
+
+  local base_dir
+  if [[ "$scope" == "global" ]]; then
+    base_dir="${HOME}"
+  else
+    base_dir="$(pwd)"
+  fi
+
+  # Parse install map and download each file
+  local files
+  files=$(echo "$manifest" | jq -r '.install // {} | to_entries[] | "\(.key)\t\(.value)"')
+
+  if [[ -z "$files" ]]; then
+    die "No files to install (empty install map in manifest)"
+  fi
+
+  local count=0
+  while IFS=$'\t' read -r source target; do
+    local source_path="${category}/${item}/${source}"
+    local target_path
+
+    # Handle ~ prefix for global install
+    if [[ "$target" == ~* ]]; then
+      target_path="${HOME}${target:1}"
+    else
+      target_path="${base_dir}/${target}"
+    fi
+
+    local target_dir
+    target_dir=$(dirname "$target_path")
+    mkdir -p "$target_dir"
+
+    info "Downloading ${source}..."
+    local content
+    content=$(fetch_file "$source_path")
+
+    if [[ -f "$target_path" ]]; then
+      echo "  ${YELLOW}File exists:${NC} ${target_path}"
+      echo -n "  Overwrite? [y/N] "
+      read -r confirm
+      if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        warn "Skipped ${source}"
+        continue
+      fi
+    fi
+
+    echo "$content" > "$target_path"
+    success "  ${source} -> ${target_path}"
+    ((count++))
+  done <<< "$files"
+
+  echo
+  success "Installed ${count} file(s) from ${name}"
+
+  # Run post-install hook if defined
+  local post_install
+  post_install=$(echo "$manifest" | jq -r '.postInstall // empty')
+  if [[ -n "$post_install" ]]; then
+    echo ""
+    echo "${DIM}Post-install note: ${post_install}${NC}"
+  fi
+}
+
+# ── Browse (Interactive) ─────────────────────────────────────────────────────
+
+cmd_browse() {
+  show_header
+
+  # Build category list for fzf
+  local cat_list=""
+  for cat in "${CATEGORIES[@]}"; do
+    cat_list+="${cat}  $(category_label "$cat") - $(category_desc "$cat")"$'\n'
+  done
+
+  # Select category
+  local selected_cat
+  selected_cat=$(echo "$cat_list" | fzf \
+    --height=40% \
+    --reverse \
+    --header="Select a category" \
+    --prompt="category > " \
+    --ansi \
+    | awk '{print $1}') || return
+
+  [[ -z "$selected_cat" ]] && return
+
+  info "Loading items from $(category_label "$selected_cat")..."
+
+  # Get items
+  local items
+  items=$(list_items_in_category "$selected_cat")
+
+  if [[ -z "$items" ]]; then
+    warn "No items found in ${selected_cat}"
+    return
+  fi
+
+  # Build item list with descriptions
+  local item_list=""
+  while read -r item; do
+    local manifest
+    manifest=$(fetch_manifest "$selected_cat" "$item" 2>/dev/null)
+    local desc
+    desc=$(echo "$manifest" | jq -r '.description // "No description"' 2>/dev/null || echo "No description")
+    item_list+="${item}  ${DIM}${desc}${NC}"$'\n'
+  done <<< "$items"
+
+  # Select item with preview
+  local self="$0"
+  local selected_item
+  selected_item=$(echo "$item_list" | fzf \
+    --height=80% \
+    --reverse \
+    --header="[$(category_label "$selected_cat")] Select an item (ctrl-/ to toggle preview)" \
+    --prompt="item > " \
+    --ansi \
+    --preview="'${self}' _preview '${selected_cat}' {1}" \
+    --preview-window=right:50%:wrap \
+    | awk '{print $1}') || return
+
+  [[ -z "$selected_item" ]] && return
+
+  # Show details and confirm
+  echo
+  local manifest
+  manifest=$(fetch_manifest "$selected_cat" "$selected_item")
+  format_manifest "$manifest"
+  echo
+
+  echo "Install to: ${BOLD}$(pwd)${NC}"
+  echo -n "Proceed? [${GREEN}Y${NC}/n/g(lobal)] "
+  read -r confirm
+
+  case "$confirm" in
+    n|N) info "Cancelled"; return ;;
+    g|G) cmd_install "$selected_cat" "$selected_item" "global" ;;
+    *)   cmd_install "$selected_cat" "$selected_item" "project" ;;
+  esac
+}
+
+# ── List ─────────────────────────────────────────────────────────────────────
+
+cmd_list() {
+  local category="${1:-}"
+
+  if [[ -z "$category" ]]; then
+    echo "${BOLD}Categories:${NC}"
+    echo ""
+    for cat in "${CATEGORIES[@]}"; do
+      echo "  ${CYAN}${cat}${NC}  $(category_desc "$cat")"
+    done
+    echo ""
+    echo "${DIM}Use: ${SCRIPT_NAME} list <category>${NC}"
+    return
+  fi
+
+  # Validate category
+  local valid=false
+  for cat in "${CATEGORIES[@]}"; do
+    [[ "$cat" == "$category" ]] && valid=true
+  done
+  $valid || die "Unknown category: ${category}\nValid: ${CATEGORIES[*]}"
+
+  info "Loading $(category_label "$category")..."
+  local items
+  items=$(list_items_in_category "$category")
+
+  if [[ -z "$items" ]]; then
+    warn "No items in ${category}"
+    return
+  fi
+
+  echo ""
+  echo "${BOLD}$(category_label "$category"):${NC}"
+  echo ""
+  while read -r item; do
+    local manifest
+    manifest=$(fetch_manifest "$category" "$item" 2>/dev/null)
+    local name desc
+    name=$(echo "$manifest" | jq -r '.name // "'"$item"'"' 2>/dev/null || echo "$item")
+    desc=$(echo "$manifest" | jq -r '.description // ""' 2>/dev/null || echo "")
+    echo "  ${CYAN}${item}${NC}  ${name}"
+    [[ -n "$desc" ]] && echo "    ${DIM}${desc}${NC}"
+  done <<< "$items"
+
+  echo ""
+  echo "${DIM}Use: ${SCRIPT_NAME} install ${category}/<item>${NC}"
+}
+
+# ── Search ───────────────────────────────────────────────────────────────────
+
+cmd_search() {
+  local query="$1"
+  info "Searching for '${query}'..."
+
+  local results=""
+  for cat in "${CATEGORIES[@]}"; do
+    local items
+    items=$(list_items_in_category "$cat")
+    [[ -z "$items" ]] && continue
+
+    while read -r item; do
+      local manifest
+      manifest=$(fetch_manifest "$cat" "$item" 2>/dev/null)
+      local name desc tags
+      name=$(echo "$manifest" | jq -r '.name // ""' 2>/dev/null || echo "")
+      desc=$(echo "$manifest" | jq -r '.description // ""' 2>/dev/null || echo "")
+      tags=$(echo "$manifest" | jq -r '(.tags // []) | join(" ")' 2>/dev/null || echo "")
+
+      local searchable="${item} ${name} ${desc} ${tags}"
+      if echo "$searchable" | grep -qi "$query"; then
+        results+="${cat}/${item}  ${name} - ${desc}"$'\n'
+      fi
+    done <<< "$items"
+  done
+
+  if [[ -z "$results" ]]; then
+    warn "No results for '${query}'"
+    return
+  fi
+
+  echo ""
+  echo "${BOLD}Results:${NC}"
+  echo ""
+
+  local self="$0"
+  local selected
+  selected=$(echo "$results" | fzf \
+    --height=60% \
+    --reverse \
+    --header="Search: ${query}" \
+    --prompt="select > " \
+    --ansi \
+    --preview="'${self}' _preview {1}" \
+    --preview-window=right:50%:wrap \
+    | awk '{print $1}') || return
+
+  [[ -z "$selected" ]] && return
+
+  local sel_cat sel_item
+  sel_cat=$(echo "$selected" | cut -d/ -f1)
+  sel_item=$(echo "$selected" | cut -d/ -f2)
+
+  echo
+  local manifest
+  manifest=$(fetch_manifest "$sel_cat" "$sel_item")
+  format_manifest "$manifest"
+  echo
+
+  echo "Install to: ${BOLD}$(pwd)${NC}"
+  echo -n "Proceed? [${GREEN}Y${NC}/n/g(lobal)] "
+  read -r confirm
+
+  case "$confirm" in
+    n|N) info "Cancelled" ;;
+    g|G) cmd_install "$sel_cat" "$sel_item" "global" ;;
+    *)   cmd_install "$sel_cat" "$sel_item" "project" ;;
+  esac
+}
+
+# ── Info ─────────────────────────────────────────────────────────────────────
+
+cmd_info() {
+  local path="$1"
+  local category item
+  category=$(echo "$path" | cut -d/ -f1)
+  item=$(echo "$path" | cut -d/ -f2)
+
+  [[ -z "$category" || -z "$item" ]] && die "Usage: ${SCRIPT_NAME} info <category>/<item>"
+
+  local manifest
+  manifest=$(fetch_manifest "$category" "$item")
+  [[ "$manifest" == "{}" ]] && die "Not found: ${path}"
+
+  echo
+  format_manifest "$manifest"
+  echo
+}
+
+# ── Config Command ───────────────────────────────────────────────────────────
+
+cmd_config() {
+  echo "${BOLD}off-the-shelf configuration${NC}"
+  echo ""
+  echo "Current repo: ${CYAN}${REPO:-<not set>}${NC}"
+  echo "Branch:       ${CYAN}${BRANCH}${NC}"
+  echo "Config file:  ${DIM}${CONFIG_FILE}${NC}"
+  echo "Cache dir:    ${DIM}${CACHE_DIR}${NC}"
+  echo
+
+  echo -n "New repo [${REPO}]: "
+  read -r new_repo
+  REPO="${new_repo:-$REPO}"
+
+  echo -n "Branch [${BRANCH}]: "
+  read -r new_branch
+  BRANCH="${new_branch:-$BRANCH}"
+
+  save_config
+}
+
+# ── Update (Clear Cache) ────────────────────────────────────────────────────
+
+cmd_update() {
+  info "Clearing cache..."
+  rm -rf "$CACHE_DIR"
+  success "Cache cleared. Next browse will fetch fresh data."
+}
+
+# ── Init (Create Registry Repo Template) ─────────────────────────────────────
+
+cmd_init() {
+  local target="${1:-.}"
+
+  if [[ -d "${target}/agents" && -d "${target}/skills" ]]; then
+    warn "Registry structure already exists in ${target}"
+    echo -n "Reinitialize? [y/N] "
+    read -r confirm
+    [[ "$confirm" != "y" && "$confirm" != "Y" ]] && return
+  fi
+
+  info "Initializing registry structure in ${target}..."
+
+  for cat in "${CATEGORIES[@]}"; do
+    mkdir -p "${target}/${cat}"
+  done
+
+  # Create a sample manifest
+  mkdir -p "${target}/agents/example-agent"
+  cat > "${target}/agents/example-agent/manifest.json" <<'MANIFEST'
+{
+  "name": "Example Agent",
+  "description": "A sample agent to show the registry format",
+  "author": "your-name",
+  "tags": ["example", "template"],
+  "install": {
+    "agent.md": ".claude/commands/example-agent.md"
+  },
+  "postInstall": "Run /example-agent to test this skill."
+}
+MANIFEST
+
+  cat > "${target}/agents/example-agent/agent.md" <<'AGENT'
+You are an example agent. Replace this with your actual agent prompt.
+
+When invoked, greet the user and explain what you do.
+AGENT
+
+  # Create README
+  cat > "${target}/README.md" <<'README'
+# Claude Code Registry
+
+A collection of reusable Claude Code assets.
+
+## Categories
+
+| Category | Description |
+|----------|-------------|
+| `agents/` | Agent prompts and configurations |
+| `skills/` | Custom slash command skills |
+| `claude-md/` | CLAUDE.md project templates |
+| `hooks/` | Hook configurations |
+| `mcp-configs/` | MCP server configurations |
+
+## Structure
+
+Each item is a folder inside its category with:
+- `manifest.json` - metadata and install mapping
+- One or more files to install
+
+### manifest.json format
+
+```json
+{
+  "name": "Human-readable name",
+  "description": "What this item does",
+  "author": "github-username",
+  "tags": ["tag1", "tag2"],
+  "install": {
+    "source-file.md": ".claude/commands/target.md"
+  },
+  "postInstall": "Optional message shown after install"
+}
+```
+
+## Usage
+
+Install the CLI: `curl -fsSL https://raw.githubusercontent.com/YOUR_USER/off-the-shelf/main/install.sh | bash`
+
+Then run: `off-the-shelf`
+README
+
+  success "Registry initialized in ${target}"
+  echo "${DIM}Add items to each category folder, push to GitHub, and share!${NC}"
+}
+
+# ── Usage ────────────────────────────────────────────────────────────────────
+
+usage() {
+  cat <<EOF
+${BOLD}off-the-shelf${NC} v${VERSION} - Claude Code Asset Registry
+
+${BOLD}USAGE:${NC}
+  ${SCRIPT_NAME} [command] [args]
+
+${BOLD}COMMANDS:${NC}
+  browse          Interactive browser with fzf (default)
+  list [category] List categories or items in a category
+  search <query>  Search items across all categories
+  info <cat/item> Show details for an item
+  install <c/i>   Install an item to current directory
+  config          Configure registry settings
+  update          Clear cache and refresh
+  init [dir]      Create a new registry repo structure
+
+${BOLD}CATEGORIES:${NC}
+  agents          Agent prompts and configurations
+  skills          Custom slash command skills
+  claude-md       CLAUDE.md project templates
+  hooks           Hook configurations
+  mcp-configs     MCP server configurations
+
+${BOLD}EXAMPLES:${NC}
+  ${SCRIPT_NAME}                          # Interactive browse
+  ${SCRIPT_NAME} list skills              # List all skills
+  ${SCRIPT_NAME} search "review"          # Search for review-related items
+  ${SCRIPT_NAME} install skills/commit    # Install a skill directly
+  ${SCRIPT_NAME} info agents/reviewer     # Show item details
+  ${SCRIPT_NAME} init ./my-registry       # Create a new registry repo
+
+${BOLD}ENVIRONMENT:${NC}
+  GITHUB_TOKEN    GitHub token for private repos / higher rate limits
+
+EOF
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+main() {
+  local cmd="${1:-browse}"
+  shift || true
+
+  # Internal commands (used by fzf preview)
+  if [[ "$cmd" == "_preview" ]]; then
+    load_config
+    # Handle both "category/item" and "category item" formats
+    if [[ "$1" == */* ]]; then
+      local cat item
+      cat=$(echo "$1" | cut -d/ -f1)
+      item=$(echo "$1" | cut -d/ -f2)
+      cmd_preview "$cat" "$item"
+    else
+      cmd_preview "$1" "$2"
+    fi
+    exit 0
+  fi
+
+  check_deps
+  load_config
+
+  case "$cmd" in
+    browse|b)
+      ensure_repo
+      cmd_browse
+      ;;
+    list|ls|l)
+      ensure_repo
+      cmd_list "${1:-}"
+      ;;
+    search|s)
+      [[ -z "${1:-}" ]] && die "Usage: ${SCRIPT_NAME} search <query>"
+      ensure_repo
+      cmd_search "$1"
+      ;;
+    info|i)
+      [[ -z "${1:-}" ]] && die "Usage: ${SCRIPT_NAME} info <category>/<item>"
+      ensure_repo
+      cmd_info "$1"
+      ;;
+    install|in)
+      [[ -z "${1:-}" ]] && die "Usage: ${SCRIPT_NAME} install <category>/<item>"
+      ensure_repo
+      local cat item
+      cat=$(echo "$1" | cut -d/ -f1)
+      item=$(echo "$1" | cut -d/ -f2)
+      cmd_install "$cat" "$item" "${2:-project}"
+      ;;
+    config|cfg)
+      cmd_config
+      ;;
+    update|u)
+      cmd_update
+      ;;
+    init)
+      cmd_init "${1:-.}"
+      ;;
+    help|--help|-h)
+      usage
+      ;;
+    version|--version|-v)
+      echo "${SCRIPT_NAME} v${VERSION}"
+      ;;
+    *)
+      die "Unknown command: ${cmd}\nRun '${SCRIPT_NAME} help' for usage."
+      ;;
+  esac
+}
+
+main "$@"

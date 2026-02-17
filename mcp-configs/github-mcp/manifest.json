@@ -1,0 +1,10 @@
+{
+  "name": "GitHub MCP Server",
+  "description": "MCP server config for GitHub integration (issues, PRs, repos)",
+  "author": "XeldarAlz",
+  "tags": ["github", "mcp", "integration"],
+  "install": {
+    "mcp-config.json": ".claude/mcp-servers.json"
+  },
+  "postInstall": "Set your GITHUB_TOKEN environment variable for authentication."
+}

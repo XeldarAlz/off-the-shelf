@@ -1,0 +1,10 @@
+{
+  "name": "Quick Commit",
+  "description": "Generates a conventional commit message from staged changes and commits automatically",
+  "author": "XeldarAlz",
+  "tags": ["git", "commit", "automation"],
+  "install": {
+    "quick-commit.md": ".claude/commands/quick-commit.md"
+  },
+  "postInstall": "Use /quick-commit to auto-commit staged changes."
+}

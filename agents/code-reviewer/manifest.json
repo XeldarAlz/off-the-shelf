@@ -1,0 +1,10 @@
+{
+  "name": "Code Reviewer",
+  "description": "Reviews code changes and provides structured feedback on quality, bugs, and improvements",
+  "author": "XeldarAlz",
+  "tags": ["review", "code-quality", "feedback"],
+  "install": {
+    "review.md": ".claude/commands/review.md"
+  },
+  "postInstall": "Use /review in Claude Code to review staged changes."
+}

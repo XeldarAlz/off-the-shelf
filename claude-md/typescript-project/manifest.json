@@ -1,0 +1,10 @@
+{
+  "name": "TypeScript Project",
+  "description": "CLAUDE.md template for TypeScript/Node.js projects with common conventions and patterns",
+  "author": "XeldarAlz",
+  "tags": ["typescript", "nodejs", "template"],
+  "install": {
+    "CLAUDE.md": "CLAUDE.md"
+  },
+  "postInstall": "Edit CLAUDE.md to customize for your specific project."
+}

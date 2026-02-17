@@ -1,0 +1,10 @@
+{
+  "name": "Lint on Edit",
+  "description": "Runs ESLint automatically after Claude edits a JS/TS file",
+  "author": "XeldarAlz",
+  "tags": ["lint", "eslint", "automation"],
+  "install": {
+    "hook-config.json": ".claude/settings.local.json"
+  },
+  "postInstall": "Merge the hook config into your existing .claude/settings.json if you have one."
+}
