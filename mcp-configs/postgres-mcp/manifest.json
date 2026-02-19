@@ -1,0 +1,10 @@
+{
+  "name": "PostgreSQL MCP Server",
+  "description": "MCP server configuration for PostgreSQL database access and querying",
+  "author": "XeldarAlz",
+  "tags": ["mcp", "postgres", "database", "sql"],
+  "install": {
+    "mcp-config.json": ".claude/mcp-servers.json"
+  },
+  "postInstall": "Set the DATABASE_URL environment variable to your PostgreSQL connection string."
+}

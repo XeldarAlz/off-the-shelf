@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+      - name: Lint ots
+        run: shellcheck ots
+      - name: Lint install.sh
+        run: shellcheck install.sh
+
+  validate-manifests:
+    name: Validate Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate all manifest.json files
+        run: |
+          status=0
+          for manifest in */*/manifest.json; do
+            echo "Checking $manifest..."
+
+            # Valid JSON
+            if ! jq empty "$manifest" 2>/dev/null; then
+              echo "  FAIL: Invalid JSON"
+              status=1
+              continue
+            fi
+
+            # Required fields
+            for field in name description author install; do
+              if ! jq -e ".$field" "$manifest" >/dev/null 2>&1; then
+                echo "  FAIL: Missing required field '$field'"
+                status=1
+              fi
+            done
+
+            echo "  OK"
+          done
+          exit $status
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats and helpers
+        run: |
+          sudo apt-get install -y bats
+          # Install bats helpers
+          git clone --depth 1 https://github.com/bats-core/bats-support.git test/test_helper/bats-support
+          git clone --depth 1 https://github.com/bats-core/bats-assert.git test/test_helper/bats-assert
+      - name: Run tests
+        run: bats test/*.bats

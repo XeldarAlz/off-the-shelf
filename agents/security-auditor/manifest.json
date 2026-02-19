@@ -1,0 +1,10 @@
+{
+  "name": "Security Auditor",
+  "description": "Reviews code for security vulnerabilities against OWASP Top 10 patterns",
+  "author": "XeldarAlz",
+  "tags": ["security", "owasp", "audit", "vulnerabilities"],
+  "install": {
+    "security-audit.md": ".claude/commands/security-audit.md"
+  },
+  "postInstall": "Use /security-audit in Claude Code to audit a file or project."
+}

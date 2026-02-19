@@ -1,0 +1,10 @@
+{
+  "name": "Rust Project",
+  "description": "CLAUDE.md template for Rust projects with cargo, clippy, and idiomatic patterns",
+  "author": "XeldarAlz",
+  "tags": ["rust", "cargo", "clippy", "template"],
+  "install": {
+    "CLAUDE.md": "CLAUDE.md"
+  },
+  "postInstall": "Edit CLAUDE.md to customize for your specific Rust project."
+}

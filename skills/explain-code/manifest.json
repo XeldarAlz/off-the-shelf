@@ -1,0 +1,10 @@
+{
+  "name": "Explain Code",
+  "description": "Explains code in plain language with complexity analysis and key concepts",
+  "author": "XeldarAlz",
+  "tags": ["explain", "documentation", "learning", "readability"],
+  "install": {
+    "explain-code.md": ".claude/commands/explain-code.md"
+  },
+  "postInstall": "Use /explain-code in Claude Code and point it at a file or function."
+}

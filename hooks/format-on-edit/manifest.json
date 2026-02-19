@@ -1,0 +1,10 @@
+{
+  "name": "Format on Edit",
+  "description": "Runs Prettier after Claude edits JS, TS, CSS, HTML, or JSON files",
+  "author": "XeldarAlz",
+  "tags": ["prettier", "formatting", "automation", "hooks"],
+  "install": {
+    "hook-config.json": ".claude/settings.local.json"
+  },
+  "postInstall": "Merge into your existing .claude/settings.local.json if you have one. Requires prettier installed in your project."
+}

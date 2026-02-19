@@ -1,0 +1,10 @@
+{
+  "name": "Refactor Advisor",
+  "description": "Identifies code smells and suggests refactoring strategies with concrete steps",
+  "author": "XeldarAlz",
+  "tags": ["refactoring", "code-quality", "code-smells", "clean-code"],
+  "install": {
+    "refactor.md": ".claude/commands/refactor.md"
+  },
+  "postInstall": "Use /refactor in Claude Code to analyze a file or function."
+}

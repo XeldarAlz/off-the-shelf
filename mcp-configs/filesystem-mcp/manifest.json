@@ -1,0 +1,10 @@
+{
+  "name": "Filesystem MCP Server",
+  "description": "MCP server configuration for local filesystem access with read/write capabilities",
+  "author": "XeldarAlz",
+  "tags": ["mcp", "filesystem", "files", "local"],
+  "install": {
+    "mcp-config.json": ".claude/mcp-servers.json"
+  },
+  "postInstall": "Edit .claude/mcp-servers.json to adjust the allowed directories for your project."
+}

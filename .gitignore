@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Editors
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Test temp dirs
+test/tmp/
+test/.tmp/
+
+# Cache dirs
+.cache/
+
+# Node
+node_modules/

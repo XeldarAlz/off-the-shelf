@@ -1,0 +1,10 @@
+{
+  "name": "Doc Generator",
+  "description": "Generates JSDoc, TSDoc, or docstrings for undocumented functions in a file",
+  "author": "XeldarAlz",
+  "tags": ["documentation", "jsdoc", "tsdoc", "docstrings"],
+  "install": {
+    "doc-generator.md": ".claude/commands/doc-generator.md"
+  },
+  "postInstall": "Use /doc-generator in Claude Code and point it at a file."
+}

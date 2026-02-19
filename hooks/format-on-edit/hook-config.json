@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "afterEdit": [
+      {
+        "pattern": "\\.(js|ts|jsx|tsx|css|html|json)$",
+        "command": "npx prettier --write $FILE"
+      }
+    ]
+  }
+}

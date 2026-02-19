@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "afterEdit": [
+      {
+        "pattern": "^src/.*\\.(js|ts|jsx|tsx)$",
+        "command": "npx vitest run --reporter=verbose --changed"
+      }
+    ]
+  }
+}

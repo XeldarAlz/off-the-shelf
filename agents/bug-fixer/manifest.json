@@ -1,0 +1,10 @@
+{
+  "name": "Bug Fixer",
+  "description": "Analyzes errors, stack traces, and unexpected behavior to propose targeted fixes",
+  "author": "XeldarAlz",
+  "tags": ["debugging", "errors", "stack-trace", "bug-fix"],
+  "install": {
+    "bug-fixer.md": ".claude/commands/bug-fixer.md"
+  },
+  "postInstall": "Use /bug-fixer in Claude Code and paste an error or stack trace."
+}

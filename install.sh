@@ -36,10 +36,23 @@ if ! command -v fzf &>/dev/null; then
   echo "Continuing install anyway (fzf needed at runtime)..."
 fi
 
-# Download the script
+# Download the script to temp file, validate, then install
 info "Downloading ots..."
 mkdir -p "$INSTALL_DIR"
-curl -fsSL "https://raw.githubusercontent.com/${REPO}/${BRANCH}/ots" -o "${INSTALL_DIR}/${SCRIPT_NAME}"
+TEMP_FILE=$(mktemp "${TMPDIR:-/tmp}/ots-install.XXXXXX")
+cleanup() { rm -f "$TEMP_FILE"; }
+trap cleanup EXIT
+
+curl -fsSL --connect-timeout 10 --max-time 30 \
+  "https://raw.githubusercontent.com/${REPO}/${BRANCH}/ots" -o "$TEMP_FILE" || \
+  die "Download failed. Check your network connection."
+
+# Validate the downloaded script
+if ! head -1 "$TEMP_FILE" | grep -q '^#!/usr/bin/env bash'; then
+  die "Downloaded file is not a valid bash script"
+fi
+
+mv "$TEMP_FILE" "${INSTALL_DIR}/${SCRIPT_NAME}"
 chmod +x "${INSTALL_DIR}/${SCRIPT_NAME}"
 
 # Pre-configure the registry repo

@@ -1,0 +1,10 @@
+{
+  "name": "Python Project",
+  "description": "CLAUDE.md template for Python projects with pytest, ruff, and type hints conventions",
+  "author": "XeldarAlz",
+  "tags": ["python", "pytest", "ruff", "template"],
+  "install": {
+    "CLAUDE.md": "CLAUDE.md"
+  },
+  "postInstall": "Edit CLAUDE.md to customize for your specific Python project."
+}

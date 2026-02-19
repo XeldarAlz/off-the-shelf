@@ -1,0 +1,10 @@
+{
+  "name": "Write Tests",
+  "description": "Generates comprehensive unit tests for a function or module with edge cases",
+  "author": "XeldarAlz",
+  "tags": ["testing", "unit-tests", "tdd", "coverage"],
+  "install": {
+    "write-tests.md": ".claude/commands/write-tests.md"
+  },
+  "postInstall": "Use /write-tests in Claude Code and point it at a function or module."
+}

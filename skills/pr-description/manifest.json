@@ -1,0 +1,10 @@
+{
+  "name": "PR Description",
+  "description": "Generates a pull request description from the current branch diff",
+  "author": "XeldarAlz",
+  "tags": ["git", "pull-request", "automation", "github"],
+  "install": {
+    "pr-description.md": ".claude/commands/pr-description.md"
+  },
+  "postInstall": "Use /pr-description in Claude Code before opening a PR."
+}

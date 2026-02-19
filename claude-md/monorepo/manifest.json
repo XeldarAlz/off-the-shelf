@@ -1,0 +1,10 @@
+{
+  "name": "Monorepo",
+  "description": "CLAUDE.md template for monorepos with workspace navigation and cross-package guidance",
+  "author": "XeldarAlz",
+  "tags": ["monorepo", "workspace", "template", "multi-package"],
+  "install": {
+    "CLAUDE.md": "CLAUDE.md"
+  },
+  "postInstall": "Edit CLAUDE.md to list your actual packages and their purposes."
+}

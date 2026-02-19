@@ -1,0 +1,10 @@
+{
+  "name": "Test on Edit",
+  "description": "Runs related tests after Claude edits source files",
+  "author": "XeldarAlz",
+  "tags": ["testing", "automation", "hooks", "tdd"],
+  "install": {
+    "hook-config.json": ".claude/settings.local.json"
+  },
+  "postInstall": "Merge into your existing .claude/settings.local.json if you have one. Adjust the test command for your framework."
+}
